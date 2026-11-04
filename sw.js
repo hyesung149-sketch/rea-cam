@@ -1,5 +1,5 @@
 // 오프라인에서도 앱 화면이 열리도록: 네트워크 우선, 실패하면 캐시
-const CACHE = 'rea-cam-v1';
+const CACHE = 'rea-cam-v2';
 const SHELL = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {

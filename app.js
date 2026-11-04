@@ -11,7 +11,7 @@ addEventListener('unhandledrejection', (e) => toast('오류: ' + ((e.reason && e
 const SLIDERS = {
   filter: [['intensity', '필터 강도', 0, 100, 80]],
   beauty: [['smooth', '피부 보정', 0, 100, 45], ['bright', '화사하게', 0, 100, 25], ['tone', '피부톤', -50, 50, 10, 50], ['sharp', '선명하게', 0, 100, 20]],
-  face:   [['eye', '눈 크게', 0, 100, 30], ['slim', '갸름하게', 0, 100, 35]],
+  face:   [['eye', '눈 크게', 0, 100, 35], ['slim', '갸름하게', 0, 100, 40]],
   makeup: [['lipAmt', '립 강도', 0, 100, 55], ['blushAmt', '블러셔', 0, 100, 35]],
   edit:   [['eBright', '밝기', -50, 50, 0, 50], ['eCon', '대비', -50, 50, 0, 50], ['eSat', '채도', -50, 50, 0, 50],
            ['eTemp', '색온도', -50, 50, 0, 50], ['eVig', '비네팅', 0, 100, 0], ['eGrain', '그레인', 0, 100, 0]],
@@ -34,7 +34,12 @@ const FILTERS = [
   { name: '모노',   con: 1.15, mono: 1 },
 ].map((f) => ({ ...ID, ...f }));
 // 눈 위치만 알 때 쓰는 평균 얼굴 비율 (입술 중심·반지름, 양 볼)
-const FEAT0 = { mc: [0, 1.08], mr: [0.44, 0.22], c1: [-0.62, 0.72], c2: [0.62, 0.72] };
+// jaw: 턱선 제어점 7개 [왼볼, 오른볼, 왼턱, 오른턱, 왼아래턱, 오른아래턱, 턱끝], er: 눈 확대 반경
+const FEAT0 = { mc: [0, 1.08], mr: [0.44, 0.22], c1: [-0.62, 0.72], c2: [0.62, 0.72], er: 0.4,
+  jaw: [[-1.05, 0.75], [1.05, 0.75], [-0.95, 1.3], [0.95, 1.3], [-0.65, 1.7], [0.65, 1.7], [0, 1.95]] };
+// 갸름하게 100%일 때 각 제어점을 얼굴 중심선 쪽으로 옮기는 비율 (턱끝은 위로)
+const JAW_PULL = [0.12, 0.12, 0.22, 0.22, 0.2, 0.2];
+const JAW_CHIN_UP = 0.08;
 const RATIOS = [{ k: '3:4', r: 3 / 4 }, { k: '1:1', r: 1 }, { k: '9:16', r: 9 / 16 }, { k: '원본', r: 0 }];
 const TIMERS = [0, 3, 10];
 
@@ -236,6 +241,9 @@ uniform vec3 u_lip, u_blush;
 uniform float u_expo, u_con, u_sat, u_warm, u_fade, u_vig, u_grain, u_mono;
 uniform vec3 u_tint;
 uniform float u_eb, u_ec, u_es, u_et, u_ev, u_eg;
+uniform vec2 u_wc[7];   // 턱선 제어점 (픽셀)
+uniform vec2 u_wv[7];   // 각 제어점을 옮길 방향·거리 (갸름하게 100% 기준, 픽셀)
+uniform float u_wrad, u_er; // 턱선 영향 반경(픽셀), 눈 확대 반경(눈 사이 거리 단위)
 const vec3 LUM = vec3(0.299, 0.587, 0.114);
 
 float skinMask(vec3 c){
@@ -249,19 +257,32 @@ vec2 toFace(vec2 uv, out vec2 c, out vec2 ex, out vec2 ey, out float d){
   d = max(length(dv), 1.0); ex = dv / d; ey = vec2(ex.y, -ex.x);
   return vec2(dot(P - c, ex), dot(P - c, ey)) / d;
 }
+// 출력 픽셀이 원본의 어디를 가져올지 계산 (역방향 워프)
 vec2 warp(vec2 uv){
   if (u_face < 0.5) return uv;
-  vec2 c, ex, ey; float d;
-  vec2 L = toFace(uv, c, ex, ey, d);
-  for (int k = 0; k < 2; k++) {
-    vec2 E = vec2(k == 0 ? -0.5 : 0.5, 0.0);
-    vec2 D = L - E; float t = dot(D, D) / 0.18;
-    if (t < 1.0) { float s = 1.0 - u_eye * 0.38 * (1.0 - t) * (1.0 - t); L = E + D * s; }
+  vec2 P = uv * u_size;
+  // 1) 갸름하게: 턱선 제어점들을 얼굴 중심 쪽으로 밀기 (리퀴파이 방식)
+  if (u_slim > 0.001) {
+    vec2 disp = vec2(0.0);
+    float r2 = u_wrad * u_wrad;
+    for (int i = 0; i < 7; i++) {
+      vec2 D = P - u_wc[i];
+      float t = dot(D, D) / r2;
+      if (t < 1.0) { float w = 1.0 - t; disp += u_wv[i] * (w * w); }
+    }
+    P -= disp * u_slim;
   }
-  float wy = smoothstep(0.15, 0.8, L.y) * (1.0 - smoothstep(1.45, 1.95, L.y));
-  float wx = 1.0 - smoothstep(0.7, 1.5, abs(L.x));
-  L.x *= 1.0 + u_slim * 0.16 * wy * wx;
-  return (c + (L.x * ex + L.y * ey) * d) / u_size;
+  // 2) 눈 크게: 각 눈 중심에서 렌즈처럼 확대
+  if (u_eye > 0.001) {
+    vec2 c = (u_e1 + u_e2) * 0.5; float d = max(length(u_e2 - u_e1), 1.0);
+    float r = u_er * 1.3 * d, r2 = r * r;
+    for (int k = 0; k < 2; k++) {
+      vec2 E = k == 0 ? u_e1 : u_e2;
+      vec2 D = P - E; float t = dot(D, D) / r2;
+      if (t < 1.0) { float s = 1.0 - u_eye * 0.5 * (1.0 - t); P = E + D * s; }
+    }
+  }
+  return P / u_size;
 }
 float noise(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5; }
 
@@ -416,6 +437,20 @@ function draw() {
     u2('u_e1', S.eyes[0][0], S.eyes[0][1]); u2('u_e2', S.eyes[1][0], S.eyes[1][1]);
     const F = S.feat || FEAT0;
     u2('u_mc', F.mc[0], F.mc[1]); u2('u_mr', F.mr[0], F.mr[1]); u2('u_c1', F.c1[0], F.c1[1]); u2('u_c2', F.c2[0], F.c2[1]);
+    u1('u_er', F.er);
+    // 턱선 제어점: 얼굴 좌표 → 픽셀
+    const [a, b] = S.eyes, cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2, dx = b[0] - a[0], dy = b[1] - a[1];
+    const d = Math.max(Math.hypot(dx, dy), 1), ex = [dx / d, dy / d], ey = [ex[1], -ex[0]];
+    const toPx = (lx, ly) => [cx + (lx * ex[0] + ly * ey[0]) * d, cy + (lx * ex[1] + ly * ey[1]) * d];
+    const toVec = (lx, ly) => [(lx * ex[0] + ly * ey[0]) * d, (lx * ex[1] + ly * ey[1]) * d];
+    const wc = [], wv = [];
+    F.jaw.forEach(([lx, ly], i) => {
+      wc.push(...toPx(lx, ly));
+      wv.push(...(i < 6 ? toVec(-lx * JAW_PULL[i], 0) : toVec(0, -JAW_CHIN_UP)));
+    });
+    if (U['u_wc[0]']) gl.uniform2fv(U['u_wc[0]'], wc);
+    if (U['u_wv[0]']) gl.uniform2fv(U['u_wv[0]'], wv);
+    u1('u_wrad', 0.75 * d);
   }
   u1('u_eye', S.eye); u1('u_slim', S.slim);
   u1('u_lipAmt', lip ? S.lipAmt : 0); u3('u_lip', lip || [1, 1, 1]);
@@ -444,7 +479,9 @@ function loop() {
 }
 
 /* ───── 카메라 ───── */
+let camToken = 0; // 카메라 요청 번호: 사진을 고르면 늦게 도착한 카메라 응답은 무시
 async function startCamera() {
+  const my = ++camToken;
   if (!gl) { showEmpty(`이 기기에서 보정 엔진을 켜지 못했어요.<br><small>${glError}</small>`, false); return; }
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null; S.eyes = []; S.mirror = S.facing === 'user'; syncChoices();
@@ -453,13 +490,18 @@ async function startCamera() {
   }
   showEmpty('카메라를 켜는 중…', false);
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
+    const st = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false,
     });
+    if (my !== camToken) { st.getTracks().forEach((t) => t.stop()); return; }
+    stream = st;
     video.srcObject = stream;
     await video.play();
+    if (my !== camToken) return;
+    FACE.frame = 0;
     setMode('camera');
   } catch (e) {
+    if (my !== camToken) return;
     const why = e && e.name === 'NotAllowedError' ? '카메라 권한이 꺼져 있어요. 주소창 왼쪽 자물쇠 → 권한에서 카메라를 허용해 주세요.'
       : e && e.name === 'NotFoundError' ? '사용할 수 있는 카메라를 찾지 못했어요.' : `카메라를 열 수 없어요 (${(e && e.name) || e}).`;
     showEmpty(why, true);
@@ -486,6 +528,7 @@ async function loadFile(file) {
   const c = document.createElement('canvas'); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
   c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
   if (src.close) src.close();
+  camToken++; // 진행 중인 카메라 요청 취소
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   S.img = c; S.eyes = []; S.manual = false; S.mirror = false; syncChoices();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -525,16 +568,18 @@ async function savePhoto() { S.showOrig = false; await snapshot(); }
 /* ───── 자동 얼굴 인식 (MediaPipe, 기기 안에서만 처리) ───── */
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const FACE = { state: 'loading', lm: null, mode: 'VIDEO', busy: false, frame: 0, miss: 0 };
+const FACE = { state: 'loading', lm: null, mode: 'VIDEO', busy: false, frame: 0, miss: 0, errs: 0, delegate: 'GPU', make: null };
 async function initFace() {
   try {
     const mod = await import(`${MP}/vision_bundle.mjs`);
     const files = await mod.FilesetResolver.forVisionTasks(`${MP}/wasm`);
-    const make = (delegate) => mod.FaceLandmarker.createFromOptions(files, {
+    FACE.make = (delegate) => mod.FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numFaces: 1,
+      minFaceDetectionConfidence: 0.4, minFacePresenceConfidence: 0.4, minTrackingConfidence: 0.4,
     });
-    try { FACE.lm = await make('GPU'); } catch { FACE.lm = await make('CPU'); }
-    FACE.state = 'ready';
+    try { FACE.lm = await FACE.make('GPU'); FACE.delegate = 'GPU'; }
+    catch { FACE.lm = await FACE.make('CPU'); FACE.delegate = 'CPU'; }
+    FACE.mode = 'VIDEO'; FACE.state = 'ready';
     if (S.source === 'image' && S.img && !S.manual) await detectImage(S.img);
   } catch (e) {
     FACE.state = 'failed'; console.warn('face init failed', e);
@@ -562,39 +607,73 @@ function eyesFrom(res, w, h) {
   // 입술(입꼬리 61·291, 윗입술 0, 아랫입술 17)과 볼(50·280)의 실제 위치
   const m1 = localOf(eyes, pt(61)), m2 = localOf(eyes, pt(291)), mt = localOf(eyes, pt(0)), mb = localOf(eyes, pt(17));
   const ch = [localOf(eyes, pt(50)), localOf(eyes, pt(280))].sort((a, b) => a[0] - b[0]);
+  // 턱선(얼굴 윤곽) 랜드마크: 볼 132·361, 턱 172·397, 아래턱 150·379, 턱끝 152 → 왼쪽/오른쪽 정렬
+  const pair = (i, j) => [localOf(eyes, pt(i)), localOf(eyes, pt(j))].sort((p, q) => p[0] - q[0]);
+  const jaw = [...pair(132, 361), ...pair(172, 397), ...pair(150, 379), localOf(eyes, pt(152))];
+  const d = Math.hypot(eyes[1][0] - eyes[0][0], eyes[1][1] - eyes[0][1]) || 1;
+  const eyeW = (Math.hypot(pt(33)[0] - pt(133)[0], pt(33)[1] - pt(133)[1]) + Math.hypot(pt(362)[0] - pt(263)[0], pt(362)[1] - pt(263)[1])) / 2;
   const feat = {
     mc: [(m1[0] + m2[0]) / 2, (mt[1] + mb[1]) / 2],
     mr: [Math.max(0.2, Math.abs(m2[0] - m1[0]) / 2 * 1.1), Math.max(0.1, Math.abs(mb[1] - mt[1]) / 2 * 1.25)],
     c1: ch[0], c2: ch[1],
+    er: Math.min(0.6, Math.max(0.3, eyeW / d * 0.85)),
+    jaw,
   };
   return { eyes, feat };
 }
 const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+function lerpFeat(F, G, t) {
+  return { mc: lerp2(F.mc, G.mc, t), mr: lerp2(F.mr, G.mr, t), c1: lerp2(F.c1, G.c1, t), c2: lerp2(F.c2, G.c2, t),
+    er: F.er + (G.er - F.er) * t, jaw: F.jaw.map((p, i) => lerp2(p, G.jaw[i], t)) };
+}
 function detectVideo() {
   if (FACE.state !== 'ready' || FACE.busy) return;
   if (FACE.mode !== 'VIDEO') { setRunMode('VIDEO'); return; }
   if (++FACE.frame % 2) return;
-  let res; try { res = FACE.lm.detectForVideo(video, performance.now()); } catch { return; }
+  let res;
+  try { res = FACE.lm.detectForVideo(video, performance.now()); FACE.errs = 0; }
+  catch (e) { faceError(e); return; }
   const r = eyesFrom(res, video.videoWidth, video.videoHeight);
   const had = S.eyes.length === 2;
   if (!r) { if (++FACE.miss > 6 && had) { S.eyes = []; updateFaceState(); } return; }
   FACE.miss = 0;
   // 프레임 간 떨림 완화
   if (had && S.feat) {
-    const t = 0.65, F = S.feat;
+    const t = 0.65;
     S.eyes = S.eyes.map((p, i) => lerp2(p, r.eyes[i], t));
-    S.feat = { mc: lerp2(F.mc, r.feat.mc, t), mr: lerp2(F.mr, r.feat.mr, t), c1: lerp2(F.c1, r.feat.c1, t), c2: lerp2(F.c2, r.feat.c2, t) };
+    S.feat = lerpFeat(S.feat, r.feat, t);
   } else { S.eyes = r.eyes; S.feat = r.feat; }
   if (!had) updateFaceState();
 }
 async function detectImage(c) {
   if (FACE.state !== 'ready') return false;
-  try {
+  const run = async () => {
     await setRunMode('IMAGE');
     const r = eyesFrom(FACE.lm.detect(c), c.width, c.height);
     if (r && !S.manual) { S.eyes = r.eyes; S.feat = r.feat; render(); }
     return !!r;
-  } catch { return false; }
+  };
+  try { return await run(); }
+  catch (e) {
+    // GPU에서 실패하면 바로 CPU로 바꿔 한 번 더
+    if (FACE.delegate !== 'GPU') { console.warn(e); return false; }
+    FACE.errs = 2; await faceError(e);
+    try { return FACE.state === 'ready' ? await run() : false; } catch { return false; }
+  }
+}
+// GPU 모드에서 인식 오류가 반복되면 CPU 모드로 다시 만든다 (일부 갤럭시 GPU 대응)
+async function faceError(e) {
+  console.warn('face detect error', e);
+  if (++FACE.errs < 3 || FACE.busy) return;
+  FACE.errs = 0;
+  if (FACE.delegate === 'CPU') { FACE.state = 'failed'; updateFaceState(); toast('얼굴 인식이 이 기기에서 동작하지 않아요', 4000); return; }
+  FACE.busy = true;
+  try {
+    try { FACE.lm.close(); } catch {}
+    FACE.lm = await FACE.make('CPU'); FACE.delegate = 'CPU'; FACE.mode = 'VIDEO';
+    toast('얼굴 인식을 호환 모드로 바꿨어요', 2500);
+  } catch { FACE.state = 'failed'; updateFaceState(); }
+  finally { FACE.busy = false; }
 }
 
 /* ───── 시작 ───── */
