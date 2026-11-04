@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0a0c">
+<title>REA Cam</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <button id="btnRatio" class="chip" title="화면 비율">3:4</button>
+    <button id="btnTimer" class="chip" title="타이머">⏱ 끔</button>
+    <button id="btnMirror" class="chip" title="좌우 반전">↔ 반전</button>
+    <button id="btnReset" class="chip" title="보정 값을 기본으로">초기화</button>
+  </header>
+
+  <main id="stage">
+    <div id="empty">
+      <div id="emptyMsg">카메라를 켜는 중…</div>
+      <div class="big">
+        <button id="eRetry" class="btn primary" hidden>📷 카메라 다시 켜기</button>
+        <label class="btn" for="camIn">📸 기본 카메라로 찍기</label>
+        <label class="btn" for="albumIn">🖼 앨범에서</label>
+      </div>
+    </div>
+    <div id="frame" hidden>
+      <canvas id="view"></canvas>
+      <div id="dots"></div>
+      <div id="pickHint" hidden></div>
+      <div id="countdown"></div>
+      <div id="flash"></div>
+      <div id="badge" hidden></div>
+      <button id="compare" class="chip">원본 보기</button>
+    </div>
+  </main>
+
+  <section id="panel">
+    <div class="tabs" role="tablist">
+      <button data-tab="filter" class="tab on">필터</button>
+      <button data-tab="beauty" class="tab">뷰티</button>
+      <button data-tab="face" class="tab">얼굴</button>
+      <button data-tab="makeup" class="tab">메이크업</button>
+      <button data-tab="edit" class="tab">편집</button>
+    </div>
+    <div id="tab-filter" class="tabbody">
+      <div id="sl-filter"></div>
+      <div id="filterList" class="filters"></div>
+    </div>
+    <div id="tab-beauty" class="tabbody" hidden><div id="sl-beauty"></div></div>
+    <div id="tab-face" class="tabbody" hidden>
+      <div class="row"><span id="faceState" class="note">얼굴 인식 준비 중…</span><button id="btnPick" class="chip" hidden>👀 직접 지정</button></div>
+      <div id="sl-face"></div>
+    </div>
+    <div id="tab-makeup" class="tabbody" hidden>
+      <div class="row"><span class="note lbl">립</span><div id="lipList" class="row flat"></div></div>
+      <div class="row"><span class="note lbl">블러셔</span><div id="blushList" class="row flat"></div></div>
+      <div id="sl-makeup"></div>
+    </div>
+    <div id="tab-edit" class="tabbody" hidden><div id="sl-edit"></div></div>
+  </section>
+
+  <footer class="bottom">
+    <button id="btnGallery" class="thumb" title="갤러리"></button>
+    <button id="btnShutter" class="shutter" title="촬영"><span></span></button>
+    <div class="side">
+      <label class="round" for="albumIn" title="앨범에서 고르기">🖼</label>
+      <button id="btnFlip" class="round" title="카메라 전환">⟲</button>
+    </div>
+  </footer>
+  <input id="camIn" class="vh" type="file" accept="image/*" capture="user">
+  <input id="albumIn" class="vh" type="file" accept="image/*">
+</div>
+
+<div id="gallery" class="sheet" hidden>
+  <div class="ghead">
+    <button id="gClose" class="chip">✕ 닫기</button>
+    <span id="gCount"></span>
+    <button id="gClear" class="chip">전체 삭제</button>
+  </div>
+  <div id="gGrid"></div>
+</div>
+
+<div id="viewer" class="sheet" hidden>
+  <img id="vImg" alt="저장한 사진">
+  <div class="vbar">
+    <button id="vBack" class="chip">← 뒤로</button>
+    <button id="vShare" class="chip">공유</button>
+    <button id="vSave" class="chip primary">다운로드</button>
+    <button id="vDel" class="chip danger">삭제</button>
+  </div>
+</div>
+
+<div id="ask" hidden>
+  <div class="box"><p id="askMsg"></p>
+    <div class="row center"><button id="askNo" class="chip">취소</button><button id="askYes" class="chip danger">삭제</button></div>
+  </div>
+</div>
+<div id="toast" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
