@@ -14,6 +14,11 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--accent); out
 
 #app { height: 100dvh; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto;
   padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+#inapp { margin: 8px 12px 0; padding: 12px; border-radius: 14px; background: var(--accent); color: var(--bg); text-align: center; font-size: 13px; line-height: 1.5; }
+#inapp p { margin-bottom: 8px; }
+#inapp b { font-weight: 700; }
+#inapp .chip { background: var(--bg); color: var(--fg); }
+#inapp .chip.primary { background: var(--bg); color: var(--accent); font-weight: 700; }
 .top { display: flex; gap: 6px; padding: 10px 12px 6px; justify-content: center; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; padding: 7px 12px; border-radius: 999px; background: var(--chip); font-size: 13px; white-space: nowrap; }
 .chip.on { background: var(--fg); color: var(--bg); }

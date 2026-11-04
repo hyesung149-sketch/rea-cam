@@ -7,6 +7,38 @@ function toast(t, ms = 2200) { const el = $('toast'); el.textContent = t; el.hid
 addEventListener('error', (e) => toast('오류: ' + (e.message || e.error), 6000));
 addEventListener('unhandledrejection', (e) => toast('오류: ' + ((e.reason && e.reason.message) || e.reason), 6000));
 
+/* ───── 카카오톡 등 앱 안 브라우저: 사진 다운로드가 막혀서 외부 브라우저로 안내 ───── */
+const UA = navigator.userAgent;
+const INAPP = /KAKAOTALK/i.test(UA) ? 'kakao'
+  : /Line\//i.test(UA) ? 'line'
+  : /NAVER\(inapp|Instagram|FBAN|FBAV|DaumApps|everytimeApp|BAND\/|; wv\)/i.test(UA) ? 'other' : '';
+const ON_ANDROID = /Android/i.test(UA);
+function openExternal() {
+  const url = location.href.split('#')[0];
+  if (INAPP === 'kakao') { location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); return true; }
+  if (INAPP === 'line') { location.href = url + (url.includes('?') ? '&' : '?') + 'openExternalBrowser=1'; return true; }
+  if (ON_ANDROID) { location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end'; return true; }
+  return false;
+}
+if (INAPP) {
+  const box = $('inapp');
+  const name = INAPP === 'kakao' ? '카카오톡' : INAPP === 'line' ? '라인' : '이 앱';
+  $('inappMsg').innerHTML = `<b>${name} 안에서는 사진 저장이 안 돼요.</b><br>`
+    + (ON_ANDROID || INAPP === 'kakao' || INAPP === 'line' ? '아래 버튼으로 브라우저에서 열어 주세요.' : '오른쪽 위 메뉴에서 <b>Safari로 열기</b>를 눌러 주세요.');
+  $('inappOpen').textContent = INAPP === 'kakao' || INAPP === 'line' ? '브라우저로 열기' : ON_ANDROID ? '크롬으로 열기' : '주소 복사';
+  $('inappOpen').onclick = async () => {
+    if (openExternal()) return;
+    try { await navigator.clipboard.writeText(location.href); toast('주소를 복사했어요. Safari에 붙여 넣어 주세요', 3500); }
+    catch { toast('주소: ' + location.href, 6000); }
+  };
+  $('inappClose').onclick = () => (box.hidden = true);
+  box.hidden = false;
+  // 카카오톡은 처음 한 번 자동으로 외부 브라우저로 넘김
+  let tried = false;
+  try { tried = sessionStorage.getItem('rea-ext') === '1'; sessionStorage.setItem('rea-ext', '1'); } catch {}
+  if (INAPP === 'kakao' && !tried) setTimeout(openExternal, 400);
+}
+
 /* ───── 설정값 ───── */
 const SLIDERS = {
   filter: [['intensity', '필터 강도', 0, 100, 80]],
@@ -849,7 +881,7 @@ async function faceError(e) {
 }
 
 /* ───── 상태 진단 (얼굴 탭 하단) ───── */
-const VERSION = 'v7';
+const VERSION = 'v8';
 let detCount = 0, detFps = 0;
 setInterval(() => {
   detFps = detCount * 2; detCount = 0;

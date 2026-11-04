@@ -8,10 +8,14 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div id="app">
+  <div id="inapp" hidden>
+    <p id="inappMsg"></p>
+    <div class="row center"><button id="inappOpen" class="chip primary">크롬으로 열기</button><button id="inappClose" class="chip">닫기</button></div>
+  </div>
   <header class="top">
     <button id="btnRatio" class="chip" title="화면 비율">3:4</button>
     <button id="btnTimer" class="chip" title="타이머">⏱ 끔</button>
@@ -117,6 +121,6 @@
 </div>
 <div id="toast" hidden></div>
 
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>
