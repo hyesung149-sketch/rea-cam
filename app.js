@@ -631,7 +631,7 @@ function detectVideo() {
   if (FACE.mode !== 'VIDEO') { setRunMode('VIDEO'); return; }
   if (++FACE.frame % 2) return;
   let res;
-  try { res = FACE.lm.detectForVideo(video, performance.now()); FACE.errs = 0; }
+  try { res = FACE.lm.detectForVideo(video, performance.now()); FACE.errs = 0; detCount++; }
   catch (e) { faceError(e); return; }
   const r = eyesFrom(res, video.videoWidth, video.videoHeight);
   const had = S.eyes.length === 2;
@@ -676,6 +676,17 @@ async function faceError(e) {
   finally { FACE.busy = false; }
 }
 
+/* ───── 상태 진단 (얼굴 탭 하단) ───── */
+const VERSION = 'v3';
+let detCount = 0, detFps = 0;
+setInterval(() => {
+  detFps = detCount * 2; detCount = 0;
+  const parts = [`버전 ${VERSION}`, `인식 ${FACE.state === 'ready' ? FACE.delegate : FACE.state}`];
+  if (S.source === 'camera') parts.push(`${detFps}회/초`);
+  parts.push(S.eyes.length === 2 ? '얼굴 ✓' : '얼굴 ✗', `눈 ${Math.round(S.eye * 100)} · 갸름 ${Math.round(S.slim * 100)}`);
+  $('diag').textContent = parts.join(' · ');
+}, 500);
+
 /* ───── 시작 ───── */
 refreshThumb();
 updateFaceState();
@@ -683,4 +694,9 @@ requestAnimationFrame(loop);
 startCamera();
 initFace();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-window.__rea = { S, FACE, loadFile };
+// 점검용: 임의의 영상 스트림을 카메라처럼 넣기
+async function useStream(st) {
+  camToken++; if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = st; S.eyes = []; S.feat = null; video.srcObject = st; await video.play(); FACE.frame = 0; setMode('camera');
+}
+window.__rea = { S, FACE, loadFile, useStream };

@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div id="app">
@@ -55,6 +55,7 @@
     <div id="tab-face" class="tabbody" hidden>
       <div class="row"><span id="faceState" class="note">얼굴 인식 준비 중…</span><button id="btnPick" class="chip" hidden>👀 직접 지정</button></div>
       <div id="sl-face"></div>
+      <div id="diag" class="note"></div>
     </div>
     <div id="tab-makeup" class="tabbody" hidden>
       <div class="row"><span class="note lbl">립</span><div id="lipList" class="row flat"></div></div>
@@ -102,6 +103,6 @@
 </div>
 <div id="toast" hidden></div>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=3"></script>
 </body>
 </html>
