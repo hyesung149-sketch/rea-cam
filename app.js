@@ -220,10 +220,21 @@ async function openGallery() {
   for (const x of l) { const i = new Image(); i.src = urlOf(x); i.alt = x.name; i.onclick = () => openViewer(x); g.appendChild(i); }
   $('gallery').hidden = false;
 }
-function savedText(p) { return p.saved ? '✓ 기기에 저장됨' : '앱 갤러리에만 보관 중'; }
+// 브라우저는 다운로드가 끝났는지 알려 주지 않으므로 '다운로드 요청함'까지만 표시
+function savedText(p) { return p.saved === 'share' ? '✓ 공유함' : p.saved ? '↓ 다운로드 요청함' : '앱 갤러리에만 보관 중'; }
+const WHERE = '내 파일 → 다운로드, 또는 크롬 ⋮ → 다운로드 목록';
+function showWhere(p) {
+  const on = !!p.saved && p.saved !== 'share';
+  for (const id of ['rWhere', 'vWhere']) {
+    const el = $(id); el.hidden = !on;
+    if (on) el.innerHTML = `파일 이름 <b>${p.name}</b><br>찾는 곳: <b>${WHERE}</b><br><span class="sub">갤러리 앱 'Download' 앨범에는 몇 분 늦게 보일 수 있어요</span>`;
+  }
+}
 function openViewer(p) {
   current = p; $('vImg').src = urlOf(p);
   $('vState').textContent = savedText(p); $('vState').classList.toggle('saved', !!p.saved);
+  $('vSave').textContent = p.saved && p.saved !== 'share' ? '↓ 다시 다운로드' : '📥 기기에 저장';
+  $('vWhere').hidden = true; if (p.saved) showWhere(p);
   $('viewer').hidden = false;
 }
 // 찍은 직후 결과 화면
@@ -232,17 +243,21 @@ function openReview(p) {
   reviewing = p; $('rImg').src = urlOf(p);
   $('rState').textContent = '저장 전'; $('rState').classList.remove('saved');
   $('rSave').textContent = '📥 기기에 저장';
+  $('rWhere').hidden = true;
   $('review').hidden = false;
 }
 function markSaved(p, how) {
-  p.saved = true; DB.add(p);
+  // 이미 다운로드한 사진을 공유해도 '다운로드 요청함' 표시는 유지
+  p.saved = how === 'share' && p.saved && p.saved !== 'share' ? p.saved : how === 'share' ? 'share' : 'download';
+  DB.add(p);
   for (const [st, btn] of [['rState', 'rSave'], ['vState', 'vSave']]) {
     if ((st === 'rState' && reviewing === p) || (st === 'vState' && current === p)) {
-      $(st).textContent = '✓ 기기에 저장됨'; $(st).classList.add('saved');
-      $(btn).textContent = '✓ 저장됨 (다시 저장)';
+      $(st).textContent = savedText(p); $(st).classList.add('saved');
+      if (p.saved !== 'share') $(btn).textContent = '↓ 다시 다운로드';
     }
   }
-  toast(how === 'share' ? '공유했어요' : '저장했어요 · 갤러리 앱의 "Download" 앨범이나 내 파일 > 다운로드에 있어요', 4500);
+  showWhere(p);
+  toast(how === 'share' ? '공유 창을 열었어요' : `다운로드를 시작했어요 · ${p.name}`, 3500);
 }
 function ask(msg) {
   return new Promise((res) => {
@@ -834,7 +849,7 @@ async function faceError(e) {
 }
 
 /* ───── 상태 진단 (얼굴 탭 하단) ───── */
-const VERSION = 'v6';
+const VERSION = 'v7';
 let detCount = 0, detFps = 0;
 setInterval(() => {
   detFps = detCount * 2; detCount = 0;

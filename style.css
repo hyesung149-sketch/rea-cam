@@ -88,6 +88,9 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--accent); out
 .hint { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 20px 0; line-height: 1.5; }
 .hint b { color: var(--fg); font-weight: 600; }
 .ghost { width: 60px; }
+.where { margin: 8px 16px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface); font-size: 13px; line-height: 1.6; text-align: center; color: var(--fg); }
+.where b { color: var(--accent); font-weight: 600; word-break: break-all; }
+.where .sub { color: var(--muted); font-size: 12px; }
 #rState, #vState { font-size: 13px; }
 .saved { color: var(--accent); }
 
@@ -96,4 +99,6 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--accent); out
 #ask p { margin-bottom: 16px; font-size: 15px; }
 #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 110px); transform: translateX(-50%); max-width: 90%;
   background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 14px; font-size: 13px; z-index: 30; pointer-events: none; text-align: center; }
+/* 결과·갤러리 화면이 열려 있으면 알림을 위쪽에 띄워 저장 위치 안내와 겹치지 않게 */
+body:has(.sheet:not([hidden])) #toast { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 56px); }
 @media (prefers-reduced-motion: reduce) { #flash, .shutter span { transition: none; } }

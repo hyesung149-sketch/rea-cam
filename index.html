@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <div id="app">
@@ -90,6 +90,7 @@
 <div id="viewer" class="sheet" hidden>
   <div class="ghead"><button id="vBack" class="chip">← 뒤로</button><span id="vState" class="note"></span><button id="vDel" class="chip danger">삭제</button></div>
   <img id="vImg" class="photo" alt="찍은 사진">
+  <p id="vWhere" class="where" hidden></p>
   <p class="hint">저장이 안 되면 사진을 <b>길게 눌러</b> '이미지 다운로드'를 누르거나, <b>공유</b>에서 저장할 앱을 고르세요</p>
   <div class="vbar big">
     <button id="vShare" class="chip">📤 공유</button>
@@ -101,6 +102,7 @@
 <div id="review" class="sheet" hidden>
   <div class="ghead"><button id="rBack" class="chip">← 계속 찍기</button><span id="rState" class="note"></span><span class="ghost"></span></div>
   <img id="rImg" class="photo" alt="방금 찍은 사진">
+  <p id="rWhere" class="where" hidden></p>
   <p class="hint">저장이 안 되면 사진을 <b>길게 눌러</b> '이미지 다운로드'를 누르거나, <b>공유</b>에서 저장할 앱을 고르세요</p>
   <div class="vbar big">
     <button id="rShare" class="chip">📤 공유</button>
@@ -115,6 +117,6 @@
 </div>
 <div id="toast" hidden></div>
 
-<script type="module" src="app.js?v=6"></script>
+<script type="module" src="app.js?v=7"></script>
 </body>
 </html>
