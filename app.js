@@ -139,7 +139,7 @@ $('btnFlip').onclick = () => {
   S.facing = S.facing === 'user' ? 'environment' : 'user'; startCamera();
 };
 $('eRetry').onclick = () => startCamera();
-addEventListener('keydown', (e) => { if (e.code === 'Space' && $('gallery').hidden && $('viewer').hidden) { e.preventDefault(); $('btnShutter').click(); } });
+addEventListener('keydown', (e) => { if (e.code === 'Space' && $('gallery').hidden && $('viewer').hidden && $('review').hidden) { e.preventDefault(); $('btnShutter').click(); } });
 
 const cmp = $('compare');
 const hold = (v) => (e) => { e.preventDefault(); e.stopPropagation(); S.showOrig = v; render(); };
@@ -204,7 +204,7 @@ const DB = (() => {
   const st = (m) => db.transaction('photos', m).objectStore('photos');
   const p = (rq) => new Promise((res, rej) => { rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
   return {
-    async add(x) { await ready; if (db) { try { return await p(st('readwrite').put(x)); } catch {} } mem.push(x); },
+    async add(x) { await ready; if (db) { try { return await p(st('readwrite').put(x)); } catch {} } const i = mem.findIndex((y) => y.id === x.id); if (i >= 0) mem[i] = x; else mem.push(x); },
     async all() { await ready; let l = []; if (db) { try { l = await p(st('readonly').getAll()); } catch {} } return [...l, ...mem].sort((a, b) => b.id - a.id); },
     async del(id) { await ready; if (db) { try { await p(st('readwrite').delete(id)); } catch {} } const i = mem.findIndex((x) => x.id === id); if (i >= 0) mem.splice(i, 1); },
     async clear() { await ready; if (db) { try { await p(st('readwrite').clear()); } catch {} } mem.length = 0; },
@@ -217,8 +217,32 @@ async function refreshThumb() { const l = await DB.all(); $('btnGallery').style.
 async function openGallery() {
   const l = await DB.all(), g = $('gGrid'); g.innerHTML = ''; $('gCount').textContent = `${l.length}장`;
   if (!l.length) g.innerHTML = '<div class="none">아직 찍은 사진이 없어요</div>';
-  for (const x of l) { const i = new Image(); i.src = urlOf(x); i.alt = x.name; i.onclick = () => { current = x; $('vImg').src = urlOf(x); $('viewer').hidden = false; }; g.appendChild(i); }
+  for (const x of l) { const i = new Image(); i.src = urlOf(x); i.alt = x.name; i.onclick = () => openViewer(x); g.appendChild(i); }
   $('gallery').hidden = false;
+}
+function savedText(p) { return p.saved ? '✓ 기기에 저장됨' : '앱 갤러리에만 보관 중'; }
+function openViewer(p) {
+  current = p; $('vImg').src = urlOf(p);
+  $('vState').textContent = savedText(p); $('vState').classList.toggle('saved', !!p.saved);
+  $('viewer').hidden = false;
+}
+// 찍은 직후 결과 화면
+let reviewing = null;
+function openReview(p) {
+  reviewing = p; $('rImg').src = urlOf(p);
+  $('rState').textContent = '저장 전'; $('rState').classList.remove('saved');
+  $('rSave').textContent = '📥 기기에 저장';
+  $('review').hidden = false;
+}
+function markSaved(p, how) {
+  p.saved = true; DB.add(p);
+  for (const [st, btn] of [['rState', 'rSave'], ['vState', 'vSave']]) {
+    if ((st === 'rState' && reviewing === p) || (st === 'vState' && current === p)) {
+      $(st).textContent = '✓ 기기에 저장됨'; $(st).classList.add('saved');
+      $(btn).textContent = '✓ 저장됨 (다시 저장)';
+    }
+  }
+  toast(how === 'share' ? '공유했어요' : '저장했어요 · 갤러리 앱의 "Download" 앨범이나 내 파일 > 다운로드에 있어요', 4500);
 }
 function ask(msg) {
   return new Promise((res) => {
@@ -227,11 +251,27 @@ function ask(msg) {
     $('askYes').onclick = () => done(true); $('askNo').onclick = () => done(false);
   });
 }
-function download(p) { const a = document.createElement('a'); a.href = urlOf(p); a.download = p.name; document.body.appendChild(a); a.click(); a.remove(); }
+// 기기에 저장: 버튼을 누른 그 순간(사용자 동작 안)에 바로 다운로드를 시작해야 크롬이 막지 않음
+function download(p) {
+  try {
+    const url = URL.createObjectURL(p.blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = p.name; a.rel = 'noopener'; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000);
+    markSaved(p, 'download');
+  } catch (e) {
+    console.warn(e); share(p); // 다운로드가 막히면 공유 창으로
+  }
+}
 async function share(p) {
   const f = new File([p.blob], p.name, { type: 'image/jpeg' });
-  if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch {} }
-  else download(p);
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    try { await navigator.share({ files: [f], title: 'REA Cam' }); markSaved(p, 'share'); }
+    catch (e) { if (e && e.name !== 'AbortError') toast('공유하지 못했어요. 사진을 길게 눌러 저장해 주세요', 4000); }
+  } else {
+    toast('이 브라우저는 공유를 지원하지 않아요. 사진을 길게 눌러 저장해 주세요', 4000);
+  }
 }
 $('btnGallery').onclick = openGallery;
 $('gClose').onclick = () => ($('gallery').hidden = true);
@@ -239,6 +279,9 @@ $('gClear').onclick = async () => { if (await ask('갤러리 사진을 모두 �
 $('vBack').onclick = () => ($('viewer').hidden = true);
 $('vSave').onclick = () => current && download(current);
 $('vShare').onclick = () => current && share(current);
+$('rBack').onclick = () => { $('review').hidden = true; reviewing = null; };
+$('rSave').onclick = () => reviewing && download(reviewing);
+$('rShare').onclick = () => reviewing && share(reviewing);
 $('vDel').onclick = async () => { if (current && await ask('이 사진을 삭제할까요?')) { await DB.del(current.id); $('viewer').hidden = true; openGallery(); refreshThumb(); } };
 const stamp = () => { const d = new Date(), z = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; };
@@ -612,10 +655,10 @@ async function snapshot() {
   const fl = $('flash'); fl.classList.add('go'); requestAnimationFrame(() => fl.classList.remove('go'));
   const blob = await new Promise((r) => off.toBlob(r, 'image/jpeg', 0.93));
   if (!blob) { toast('저장하지 못했어요.'); return; }
-  const photo = { id: Date.now(), name: `REA_${stamp()}.jpg`, blob };
+  const photo = { id: Date.now(), name: `REA_${stamp()}.jpg`, blob, saved: false };
+  // 찍은 사진은 잃어버리지 않도록 앱 갤러리에 먼저 보관하고, 결과 화면에서 기기에 저장
   await DB.add(photo); refreshThumb();
-  download(photo);
-  toast('저장했어요 · 다운로드 폴더와 앱 갤러리에 있어요');
+  openReview(photo);
 }
 async function shoot() {
   if (S.busy || S.source !== 'camera') return;
@@ -791,7 +834,7 @@ async function faceError(e) {
 }
 
 /* ───── 상태 진단 (얼굴 탭 하단) ───── */
-const VERSION = 'v5';
+const VERSION = 'v6';
 let detCount = 0, detFps = 0;
 setInterval(() => {
   detFps = detCount * 2; detCount = 0;
@@ -803,6 +846,8 @@ setInterval(() => {
 }, 500);
 
 /* ───── 시작 ───── */
+// 저장 공간이 부족해도 브라우저가 앱 갤러리를 지우지 않도록 요청
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
 refreshThumb();
 updateFaceState();
 requestAnimationFrame(loop);

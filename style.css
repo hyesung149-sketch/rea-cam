@@ -81,8 +81,15 @@ button:focus-visible, label:focus-within { outline: 2px solid var(--accent); out
 #gGrid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; align-content: start; }
 #gGrid img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; cursor: pointer; }
 #gGrid .none { grid-column: 1/-1; text-align: center; color: var(--muted); padding: 60px 0; font-size: 14px; }
-#vImg { flex: 1; min-height: 0; object-fit: contain; width: 100%; }
+.photo { flex: 1; min-height: 0; object-fit: contain; width: 100%; -webkit-touch-callout: default; user-select: auto; }
 .vbar { display: flex; gap: 8px; justify-content: center; padding: 12px; flex-wrap: wrap; }
+.vbar.big { gap: 12px; padding: 8px 16px 16px; }
+.vbar.big .chip { flex: 1; max-width: 220px; justify-content: center; padding: 14px 16px; font-size: 15px; border-radius: 14px; }
+.hint { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 20px 0; line-height: 1.5; }
+.hint b { color: var(--fg); font-weight: 600; }
+.ghost { width: 60px; }
+#rState, #vState { font-size: 13px; }
+.saved { color: var(--accent); }
 
 #ask { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 24px; }
 #ask .box { background: var(--surface); border-radius: 14px; padding: 20px; width: 100%; max-width: 300px; text-align: center; }
