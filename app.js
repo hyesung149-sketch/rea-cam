@@ -11,12 +11,14 @@ addEventListener('unhandledrejection', (e) => toast('오류: ' + ((e.reason && e
 const SLIDERS = {
   filter: [['intensity', '필터 강도', 0, 100, 80]],
   beauty: [['smooth', '피부 보정', 0, 100, 45], ['bright', '화사하게', 0, 100, 25], ['tone', '피부톤', -50, 50, 10, 50], ['sharp', '선명하게', 0, 100, 20]],
-  face:   [['eye', '눈 크게', 0, 100, 35], ['slim', '갸름하게', 0, 100, 40]],
-  makeup: [['lipAmt', '립 강도', 0, 100, 55], ['blushAmt', '블러셔', 0, 100, 35]],
+  face:   [['eye', '눈 크게', 0, 100, 40], ['slim', '갸름하게', 0, 100, 40]],
+  makeup: [['lipAmt', '립 강도', 0, 100, 65], ['blushAmt', '블러셔', 0, 100, 35]],
   edit:   [['eBright', '밝기', -50, 50, 0, 50], ['eCon', '대비', -50, 50, 0, 50], ['eSat', '채도', -50, 50, 0, 50],
            ['eTemp', '색온도', -50, 50, 0, 50], ['eVig', '비네팅', 0, 100, 0], ['eGrain', '그레인', 0, 100, 0]],
 };
-const LIPS = [['없음', null], ['코랄', [1.0, 0.45, 0.38]], ['로즈', [0.9, 0.32, 0.45]], ['레드', [0.85, 0.12, 0.18]], ['누드', [0.85, 0.55, 0.48]], ['플럼', [0.6, 0.2, 0.35]]];
+const LIPS = [['없음', null],
+  ['핑크', [1.0, 0.42, 0.62]], ['연핑크', [1.0, 0.6, 0.72]], ['핫핑크', [0.98, 0.22, 0.55]],
+  ['코랄', [1.0, 0.45, 0.38]], ['로즈', [0.9, 0.32, 0.45]], ['레드', [0.85, 0.12, 0.18]], ['누드', [0.85, 0.55, 0.48]], ['플럼', [0.6, 0.2, 0.35]]];
 const BLUSH = [['없음', null], ['피치', [1.0, 0.84, 0.78]], ['핑크', [1.0, 0.8, 0.86]], ['코랄', [1.0, 0.76, 0.7]]];
 const ID = { expo: 1, con: 1, sat: 1, warm: 0, tint: [1, 1, 1], fade: 0, vig: 0, grain: 0, mono: 0 };
 const FILTERS = [
@@ -37,29 +39,44 @@ const FILTERS = [
 // jaw: 턱선 제어점 7개 [왼볼, 오른볼, 왼턱, 오른턱, 왼아래턱, 오른아래턱, 턱끝], er: 눈 확대 반경
 const FEAT0 = { mc: [0, 1.08], mr: [0.44, 0.22], c1: [-0.62, 0.72], c2: [0.62, 0.72], er: 0.4,
   jaw: [[-1.05, 0.75], [1.05, 0.75], [-0.95, 1.3], [0.95, 1.3], [-0.65, 1.7], [0.65, 1.7], [0, 1.95]] };
-// 갸름하게 100%일 때 각 제어점을 얼굴 중심선 쪽으로 옮기는 비율 (턱끝은 위로)
-const JAW_PULL = [0.12, 0.12, 0.22, 0.22, 0.2, 0.2];
-const JAW_CHIN_UP = 0.08;
+// 갸름하게 100%일 때 각 제어점을 얼굴 중심선 쪽으로 옮기는 비율 (턱끝은 위로) — 이전(v4)의 약 55%
+const JAW_PULL = [0.065, 0.065, 0.12, 0.12, 0.11, 0.11];
+const JAW_CHIN_UP = 0.045;
+// 슬라이더 값 → 실제 강도: 앞쪽 구간은 아주 미세하게, 뒤로 갈수록 커지는 곡선
+const curve = (x) => Math.pow(Math.max(0, x), 1.5);
 const RATIOS = [{ k: '3:4', r: 3 / 4 }, { k: '1:1', r: 1 }, { k: '9:16', r: 9 / 16 }, { k: '원본', r: 0 }];
 const TIMERS = [0, 3, 10];
 
-const DEF = { ratioIdx: 0, filterIdx: 1, lipIdx: 0, blushIdx: 0, timerIdx: 0 };
+const DEF = { ratioIdx: 0, filterIdx: 1, lipIdx: 1, blushIdx: 0, timerIdx: 0 }; // 립 기본: 핑크
 for (const list of Object.values(SLIDERS)) for (const [k, , , , d, sc = 100] of list) DEF[k] = d / sc;
 const KEEP = Object.keys(DEF);
 const S = { ...DEF, source: 'none', facing: 'user', mirror: true, showOrig: false, img: null,
   eyes: [], manual: false, picking: false, busy: false };
-try { const s = JSON.parse(localStorage.getItem('rea-cam-settings') || '{}'); for (const k of KEEP) if (typeof s[k] === 'number') S[k] = s[k]; } catch {}
+// 강도 기준이 바뀌어 저장 이름도 바꿈 (예전 값이 새 기준에 섞이지 않도록)
+const STORE = 'rea-cam-settings-v5';
+try { const s = JSON.parse(localStorage.getItem(STORE) || '{}'); for (const k of KEEP) if (typeof s[k] === 'number') S[k] = s[k]; } catch {}
 let saveT = 0;
-function remember() { clearTimeout(saveT); saveT = setTimeout(() => { try { const o = {}; for (const k of KEEP) o[k] = S[k]; localStorage.setItem('rea-cam-settings', JSON.stringify(o)); } catch {} }, 300); }
+function remember() { clearTimeout(saveT); saveT = setTimeout(() => { try { const o = {}; for (const k of KEEP) o[k] = S[k]; localStorage.setItem(STORE, JSON.stringify(o)); } catch {} }, 300); }
 
 /* ───── UI (엔진보다 먼저 연결) ───── */
 const sliderEls = {};
 for (const [tab, list] of Object.entries(SLIDERS)) {
   for (const [k, label, min, max, , sc = 100] of list) {
-    const lab = document.createElement('label'); lab.className = 'slider';
-    lab.innerHTML = `<span>${label}</span><input id="s-${k}" type="range" min="${min}" max="${max}"><b></b>`;
-    const inp = lab.querySelector('input'), out = lab.querySelector('b');
+    const lab = document.createElement('div'); lab.className = 'slider';
+    lab.innerHTML = `<span>${label}</span><button class="step" aria-label="${label} 줄이기">−</button>`
+      + `<input id="s-${k}" type="range" min="${min}" max="${max}" step="1" aria-label="${label}">`
+      + `<button class="step" aria-label="${label} 늘리기">+</button><b></b>`;
+    const inp = lab.querySelector('input'), out = lab.querySelector('b'), [dec, inc] = lab.querySelectorAll('.step');
     inp.oninput = () => { S[k] = inp.value / sc; out.textContent = inp.value; remember(); render(); };
+    // −/+ 버튼: 한 번 누르면 1칸, 누르고 있으면 연속
+    const nudge = (d) => { const v = Math.min(max, Math.max(min, +inp.value + d)); if (v !== +inp.value) { inp.value = v; inp.oninput(); } };
+    for (const [btn, d] of [[dec, -1], [inc, 1]]) {
+      let hold = 0, rep = 0;
+      const stop = () => { clearTimeout(hold); clearInterval(rep); };
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); nudge(d); hold = setTimeout(() => (rep = setInterval(() => nudge(d), 70)), 400); });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
+      btn.addEventListener('click', (e) => { if (e.detail === 0) nudge(d); }); // 키보드 조작
+    }
     sliderEls[k] = { inp, out, sc };
     $('sl-' + tab).appendChild(lab);
   }
@@ -159,7 +176,7 @@ $('frame').addEventListener('pointerup', (e) => {
   if (cx < 0 || cx > 1 || cy < 0 || cy > 1) return;
   S.eyes.push(screenToTex(cx, cy));
   if (S.eyes.length === 1) $('pickHint').textContent = '다른 쪽 눈을 탭하세요 (2/2)';
-  else { S.eyes = sortEyes(S.eyes); S.feat = FEAT0; S.manual = true; setPicking(false); updateFaceState(); toast('얼굴 보정과 메이크업이 켜졌어요'); }
+  else { S.eyes = sortEyes(S.eyes); S.feat = FEAT0; S.lips = null; S.manual = true; setPicking(false); updateFaceState(); toast('얼굴 보정과 메이크업이 켜졌어요'); }
   placeDots(); render();
 });
 function updateFaceState() {
@@ -238,7 +255,8 @@ varying vec2 v;
 uniform sampler2D u_t;
 uniform vec2 u_px, u_size, u_scale, u_off, u_e1, u_e2, u_mc, u_mr, u_c1, u_c2;
 uniform float u_mirror, u_rad, u_smooth, u_bright, u_tone, u_sharp, u_inten, u_seed;
-uniform float u_face, u_eye, u_slim, u_lipAmt, u_blushAmt;
+uniform float u_face, u_eye, u_slim, u_lipAmt, u_blushAmt, u_hasMask;
+uniform sampler2D u_mask; // 입술 마스크 (텍스처 1번)
 uniform vec3 u_lip, u_blush;
 uniform float u_expo, u_con, u_sat, u_warm, u_fade, u_vig, u_grain, u_mono;
 uniform vec3 u_tint;
@@ -281,7 +299,7 @@ vec2 warp(vec2 uv){
     for (int k = 0; k < 2; k++) {
       vec2 E = k == 0 ? u_e1 : u_e2;
       vec2 D = P - E; float t = dot(D, D) / r2;
-      if (t < 1.0) { float s = 1.0 - u_eye * 0.5 * (1.0 - t); P = E + D * s; }
+      if (t < 1.0) { float s = 1.0 - u_eye * 0.28 * (1.0 - t); P = E + D * s; }
     }
   }
   return P / u_size;
@@ -321,10 +339,19 @@ void main(){
     vec2 fc, fx, fy; float fd;
     vec2 L = toFace(uv, fc, fx, fy, fd);
     if (u_lipAmt > 0.001) {
-      float area = 1.0 - smoothstep(0.6, 1.0, length((L - u_mc) / u_mr));
-      float lipness = 1.0 - smoothstep(0.7, 0.86, c.g / max(c.r, 0.01));
-      vec3 target = u_lip * (dot(col, LUM) * 1.9 + 0.06);
-      col = mix(col, target, clamp(area * lipness * u_lipAmt * 0.7, 0.0, 1.0));
+      // 입술 영역: 인식된 입술 윤곽선으로 만든 마스크 (없으면 눈 위치 기반 추정)
+      float lm;
+      if (u_hasMask > 0.5) lm = texture2D(u_mask, uv).r;
+      else {
+        float area = 1.0 - smoothstep(0.6, 1.0, length((L - u_mc) / u_mr));
+        lm = area * (1.0 - smoothstep(0.7, 0.86, c.g / max(c.r, 0.01)));
+      }
+      // 립스틱: 입술의 밝고 어두운 결은 살리고 색만 바꿔 칠함 + 은은한 광택
+      float lum = dot(col, LUM);
+      vec3 lipstick = u_lip * (0.42 + lum * 1.05);
+      float a = clamp(lm * u_lipAmt, 0.0, 1.0);
+      col = mix(col, lipstick, a * 0.9);
+      col += smoothstep(0.5, 0.85, lum) * 0.18 * a;
     }
     if (u_blushAmt > 0.001) {
       float b1 = 1.0 - smoothstep(0.0, 1.0, length((L - u_c1) / 0.36));
@@ -358,7 +385,7 @@ const canvas = $('view');
 const video = document.createElement('video');
 video.playsInline = true; video.muted = true; video.autoplay = true;
 video.setAttribute('playsinline', ''); video.setAttribute('muted', '');
-let gl = null, U = {}, tex = null, glError = '', stream = null;
+let gl = null, U = {}, tex = null, maskTex = null, glError = '', stream = null;
 const seed = Math.random() * 100;
 try {
   gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, premultipliedAlpha: false }) || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true });
@@ -377,9 +404,44 @@ try {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   for (const [k, val] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
     [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, val);
+  // 입술 마스크용 텍스처 (1번 자리)
+  maskTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+  for (const [k, val] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+    [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, val);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0]));
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
   const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
   for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(prog, i); U[info.name] = gl.getUniformLocation(prog, info.name); }
+  if (U.u_mask) gl.uniform1i(U.u_mask, 1);
 } catch (e) { gl = null; glError = e.message || String(e); }
+
+/* 입술 마스크: 바깥 윤곽(20점)을 칠하고 안쪽(입 벌린 부분, 20점)을 비운 뒤 살짝 흐림 */
+const LIP_OUT = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185];
+const LIP_IN = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191];
+const mcan = document.createElement('canvas'), mctx = mcan.getContext('2d');
+function updateLipMask() {
+  if (!gl || !S.lips || !LIPS[S.lipIdx][1]) return false;
+  const [w, h] = srcWH(); if (!w || !h) return false;
+  const W = 384, H = Math.max(1, Math.round(384 * h / w));
+  if (mcan.width !== W || mcan.height !== H) { mcan.width = W; mcan.height = H; }
+  const { outer, inner } = S.lips;
+  // 입술 크기에 맞춘 흐림 정도 (경계를 자연스럽게)
+  const lw = Math.hypot(outer[0][0] - outer[10][0], outer[0][1] - outer[10][1]) * W;
+  const blur = Math.max(1, lw * 0.035);
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.filter = 'none'; mctx.globalCompositeOperation = 'source-over';
+  mctx.fillStyle = '#000'; mctx.fillRect(0, 0, W, H);
+  mctx.filter = `blur(${blur.toFixed(1)}px)`;
+  const poly = (pts) => { mctx.beginPath(); pts.forEach(([x, y], i) => (i ? mctx.lineTo(x * W, y * H) : mctx.moveTo(x * W, y * H))); mctx.closePath(); mctx.fill(); };
+  mctx.fillStyle = '#fff'; poly(outer);
+  mctx.fillStyle = '#000'; poly(inner);
+  mctx.filter = 'none';
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, mcan);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  return true;
+}
 const u1 = (n, x) => U[n] && gl.uniform1f(U[n], x), u2 = (n, a, b) => U[n] && gl.uniform2f(U[n], a, b), u3 = (n, a) => U[n] && gl.uniform3fv(U[n], a);
 
 function srcEl() { return S.source === 'image' ? S.img : video; }
@@ -454,8 +516,9 @@ function draw() {
     if (U['u_wv[0]']) gl.uniform2fv(U['u_wv[0]'], wv);
     u1('u_wrad', 0.75 * d);
   }
-  u1('u_eye', S.eye); u1('u_slim', S.slim);
+  u1('u_eye', curve(S.eye)); u1('u_slim', curve(S.slim));
   u1('u_lipAmt', lip ? S.lipAmt : 0); u3('u_lip', lip || [1, 1, 1]);
+  u1('u_hasMask', S.lips && !S.manual ? 1 : 0);
   u1('u_blushAmt', blush ? S.blushAmt : 0); u3('u_blush', blush || [1, 1, 1]);
   for (const k of ['expo', 'con', 'sat', 'warm', 'fade', 'vig', 'grain', 'mono']) u1('u_' + k, f[k]);
   u3('u_tint', f.tint);
@@ -474,7 +537,7 @@ function loop() {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
       detectVideo();
       draw();
-    } else if (S.source === 'image' && dirty) { draw(); placeDots(); }
+    } else if (S.source === 'image' && dirty) { updateLipMask(); draw(); placeDots(); }
     dirty = false;
   }
   requestAnimationFrame(loop);
@@ -648,7 +711,9 @@ function eyesFrom(res, w, h) {
     er: Math.min(0.6, Math.max(0.3, eyeW / d * 0.85)),
     jaw,
   };
-  return { eyes, feat };
+  // 입술 윤곽선 (0~1 비율, 위→아래 좌표) — 립스틱 마스크용
+  const lips = { outer: LIP_OUT.map((i) => [L[i].x, L[i].y]), inner: LIP_IN.map((i) => [L[i].x, L[i].y]) };
+  return { eyes, feat, lips };
 }
 const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 function lerpFeat(F, G, t) {
@@ -676,12 +741,20 @@ function detectVideo() {
     return;
   }
   FACE.miss = 0; FACE.found = true; FACE.noFace = 0;
-  // 프레임 간 떨림 완화
+  // 프레임 간 떨림 완화: 얼굴이 거의 그대로면 강하게 붙잡고, 크게 움직일 때만 빠르게 따라감
   if (had && S.feat) {
-    const t = 0.65;
+    const d = Math.hypot(S.eyes[1][0] - S.eyes[0][0], S.eyes[1][1] - S.eyes[0][1]) || 1;
+    const move = (Math.hypot(r.eyes[0][0] - S.eyes[0][0], r.eyes[0][1] - S.eyes[0][1])
+                + Math.hypot(r.eyes[1][0] - S.eyes[1][0], r.eyes[1][1] - S.eyes[1][1])) / 2 / d;
+    const t = Math.min(0.85, Math.max(0.12, move * 6));          // 눈 위치용
+    const tf = Math.min(0.6, Math.max(0.06, move * 4));          // 턱선·입술 모양은 더 천천히
     S.eyes = S.eyes.map((p, i) => lerp2(p, r.eyes[i], t));
-    S.feat = lerpFeat(S.feat, r.feat, t);
-  } else { S.eyes = r.eyes; S.feat = r.feat; }
+    S.feat = lerpFeat(S.feat, r.feat, tf);
+    // 입술은 말할 때 빨리 움직이므로 조금 더 빠르게 따라감
+    const tl = Math.max(0.45, t);
+    S.lips = S.lips ? { outer: S.lips.outer.map((p, i) => lerp2(p, r.lips.outer[i], tl)), inner: S.lips.inner.map((p, i) => lerp2(p, r.lips.inner[i], tl)) } : r.lips;
+  } else { S.eyes = r.eyes; S.feat = r.feat; S.lips = r.lips; }
+  updateLipMask();
   if (!had) updateFaceState();
 }
 async function detectImage(c) {
@@ -689,7 +762,7 @@ async function detectImage(c) {
   const run = async () => {
     await setRunMode('IMAGE');
     const r = eyesFrom(FACE.lm.detect(shrink(c, c.width, c.height, 1024)), c.width, c.height);
-    if (r && !S.manual) { S.eyes = r.eyes; S.feat = r.feat; FACE.found = true; render(); }
+    if (r && !S.manual) { S.eyes = r.eyes; S.feat = r.feat; S.lips = r.lips; FACE.found = true; render(); }
     return !!r;
   };
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -718,7 +791,7 @@ async function faceError(e) {
 }
 
 /* ───── 상태 진단 (얼굴 탭 하단) ───── */
-const VERSION = 'v4';
+const VERSION = 'v5';
 let detCount = 0, detFps = 0;
 setInterval(() => {
   detFps = detCount * 2; detCount = 0;
