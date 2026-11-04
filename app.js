@@ -151,6 +151,7 @@ function setPicking(on) {
   placeDots();
 }
 $('btnPick').onclick = () => setPicking(!S.picking);
+$('btnFaceRetry').onclick = () => initFace();
 $('frame').addEventListener('pointerup', (e) => {
   if (!S.picking || e.target === cmp) return;
   const r = canvas.getBoundingClientRect();
@@ -164,10 +165,11 @@ $('frame').addEventListener('pointerup', (e) => {
 function updateFaceState() {
   const ok = S.eyes.length === 2;
   let t;
-  if (FACE.state === 'loading') t = '자동 얼굴 인식을 불러오는 중…';
-  else if (FACE.state === 'failed') t = '자동 인식을 쓸 수 없어요' + (S.source === 'image' ? ' · 직접 지정하세요' : '');
+  if (FACE.state === 'loading') t = '얼굴 인식 모델을 받는 중… (처음 한 번, 몇 초 걸려요)';
+  else if (FACE.state === 'failed') t = '자동 인식 실패: ' + (FACE.reason || '알 수 없는 오류') + (S.source === 'image' ? ' · 직접 지정할 수 있어요' : '');
   else t = ok ? (S.manual ? '직접 지정한 얼굴에 적용 중' : '얼굴 자동 인식됨 ✓') : '얼굴을 찾는 중…';
   $('faceState').textContent = t;
+  $('btnFaceRetry').hidden = FACE.state !== 'failed';
   const b = $('badge'); b.hidden = !(S.source !== 'none' && FACE.state === 'ready');
   b.textContent = ok ? '● 얼굴 인식' : '○ 얼굴 없음';
 }
@@ -568,23 +570,50 @@ async function savePhoto() { S.showOrig = false; await snapshot(); }
 /* ───── 자동 얼굴 인식 (MediaPipe, 기기 안에서만 처리) ───── */
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const FACE = { state: 'loading', lm: null, mode: 'VIDEO', busy: false, frame: 0, miss: 0, errs: 0, delegate: 'GPU', make: null };
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const FACE = { state: 'loading', reason: '', lm: null, mode: 'VIDEO', busy: false, frame: 0, miss: 0, errs: 0,
+  delegate: '', make: null, tried: [], found: false, noFace: 0 };
+const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+const NET_MSG = '인식 프로그램을 받지 못했어요. 인터넷 연결을 확인해 주세요';
 async function initFace() {
+  FACE.state = 'loading'; FACE.reason = ''; FACE.found = false; FACE.noFace = 0; updateFaceState();
   try {
-    const mod = await import(`${MP}/vision_bundle.mjs`);
-    const files = await mod.FilesetResolver.forVisionTasks(`${MP}/wasm`);
-    FACE.make = (delegate) => mod.FaceLandmarker.createFromOptions(files, {
+    const mod = await withTimeout(import(`${MP}/vision_bundle.mjs`), 30000, NET_MSG);
+    const files = await withTimeout(mod.FilesetResolver.forVisionTasks(`${MP}/wasm`), 30000, NET_MSG);
+    FACE.make = (delegate) => withTimeout(mod.FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numFaces: 1,
-      minFaceDetectionConfidence: 0.4, minFacePresenceConfidence: 0.4, minTrackingConfidence: 0.4,
-    });
-    try { FACE.lm = await FACE.make('GPU'); FACE.delegate = 'GPU'; }
-    catch { FACE.lm = await FACE.make('CPU'); FACE.delegate = 'CPU'; }
-    FACE.mode = 'VIDEO'; FACE.state = 'ready';
+      minFaceDetectionConfidence: 0.35, minFacePresenceConfidence: 0.35, minTrackingConfidence: 0.35,
+    }), 45000, '얼굴 인식 모델(약 4MB)을 받지 못했어요. 인터넷 연결을 확인해 주세요');
+    // 안드로이드는 GPU 모드가 빈 결과만 내는 기기가 있어 호환(CPU) 모드부터 시작
+    const first = IS_ANDROID ? 'CPU' : 'GPU', second = first === 'GPU' ? 'CPU' : 'GPU';
+    try { FACE.lm = await FACE.make(first); FACE.delegate = first; }
+    catch (e1) { console.warn(e1); FACE.lm = await FACE.make(second); FACE.delegate = second; }
+    FACE.tried = [FACE.delegate]; FACE.mode = 'VIDEO'; FACE.state = 'ready';
     if (S.source === 'image' && S.img && !S.manual) await detectImage(S.img);
   } catch (e) {
-    FACE.state = 'failed'; console.warn('face init failed', e);
+    FACE.state = 'failed'; FACE.reason = (e && e.message) || String(e); console.warn('face init failed', e);
   }
   updateFaceState(); render();
+}
+const modeName = (d) => (d === 'GPU' ? 'GPU 모드' : '호환 모드');
+async function switchDelegate(to, why) {
+  if (FACE.busy || !FACE.make) return;
+  FACE.busy = true;
+  try {
+    try { FACE.lm.close(); } catch {}
+    FACE.lm = await FACE.make(to); FACE.delegate = to; FACE.mode = 'VIDEO'; FACE.noFace = 0; FACE.errs = 0;
+    if (!FACE.tried.includes(to)) FACE.tried.push(to);
+    if (why) toast(why, 2500);
+  } catch (e) { FACE.state = 'failed'; FACE.reason = `${modeName(to)} 전환 실패: ${(e && e.message) || e}`; }
+  finally { FACE.busy = false; updateFaceState(); }
+}
+// 인식기에 넘길 축소 영상 (긴 변 480px)
+const dcan = document.createElement('canvas'), dctx = dcan.getContext('2d', { willReadFrequently: false });
+function shrink(src, w, h, max) {
+  const k = Math.min(1, max / Math.max(w, h)), W = Math.max(1, Math.round(w * k)), H = Math.max(1, Math.round(h * k));
+  if (dcan.width !== W || dcan.height !== H) { dcan.width = W; dcan.height = H; }
+  dctx.drawImage(src, 0, 0, W, H);
+  return dcan;
 }
 async function setRunMode(mode) {
   if (FACE.mode === mode) return;
@@ -630,13 +659,23 @@ function detectVideo() {
   if (FACE.state !== 'ready' || FACE.busy) return;
   if (FACE.mode !== 'VIDEO') { setRunMode('VIDEO'); return; }
   if (++FACE.frame % 2) return;
+  const vw = video.videoWidth, vh = video.videoHeight;
   let res;
-  try { res = FACE.lm.detectForVideo(video, performance.now()); FACE.errs = 0; detCount++; }
+  try { res = FACE.lm.detectForVideo(shrink(video, vw, vh, 480), performance.now()); FACE.errs = 0; detCount++; }
   catch (e) { faceError(e); return; }
-  const r = eyesFrom(res, video.videoWidth, video.videoHeight);
+  const r = eyesFrom(res, vw, vh); // 랜드마크는 0~1 비율이라 원본 크기로 그대로 환산
   const had = S.eyes.length === 2;
-  if (!r) { if (++FACE.miss > 6 && had) { S.eyes = []; updateFaceState(); } return; }
-  FACE.miss = 0;
+  if (!r) {
+    if (++FACE.miss > 6 && had) { S.eyes = []; updateFaceState(); }
+    // 한 번도 얼굴을 못 찾은 채 약 3초가 지나면 다른 인식 방식으로 전환
+    if (!FACE.found && ++FACE.noFace > 45) {
+      const other = FACE.delegate === 'GPU' ? 'CPU' : 'GPU';
+      if (!FACE.tried.includes(other)) switchDelegate(other, `얼굴을 못 찾아 ${modeName(other)}로 바꿔 볼게요`);
+      else if (FACE.noFace === 46) toast('얼굴을 찾지 못하고 있어요. 밝은 곳에서 얼굴 전체가 화면 가운데 오게 해 주세요', 4500);
+    }
+    return;
+  }
+  FACE.miss = 0; FACE.found = true; FACE.noFace = 0;
   // 프레임 간 떨림 완화
   if (had && S.feat) {
     const t = 0.65;
@@ -649,39 +688,42 @@ async function detectImage(c) {
   if (FACE.state !== 'ready') return false;
   const run = async () => {
     await setRunMode('IMAGE');
-    const r = eyesFrom(FACE.lm.detect(c), c.width, c.height);
-    if (r && !S.manual) { S.eyes = r.eyes; S.feat = r.feat; render(); }
+    const r = eyesFrom(FACE.lm.detect(shrink(c, c.width, c.height, 1024)), c.width, c.height);
+    if (r && !S.manual) { S.eyes = r.eyes; S.feat = r.feat; FACE.found = true; render(); }
     return !!r;
   };
-  try { return await run(); }
-  catch (e) {
-    // GPU에서 실패하면 바로 CPU로 바꿔 한 번 더
-    if (FACE.delegate !== 'GPU') { console.warn(e); return false; }
-    FACE.errs = 2; await faceError(e);
-    try { return FACE.state === 'ready' ? await run() : false; } catch { return false; }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let ok = false, err = null;
+    try { ok = await run(); } catch (e) { err = e; console.warn(e); }
+    if (ok) return true;
+    // 오류가 났거나 얼굴을 못 찾으면 아직 안 써 본 방식으로 한 번 더
+    const other = FACE.delegate === 'GPU' ? 'CPU' : 'GPU';
+    if (attempt > 0 || FACE.tried.includes(other) || FACE.state !== 'ready') return false;
+    await switchDelegate(other, err ? `${modeName(other)}로 바꿔 다시 찾아볼게요` : '');
+    if (FACE.state !== 'ready') return false;
   }
+  return false;
 }
-// GPU 모드에서 인식 오류가 반복되면 CPU 모드로 다시 만든다 (일부 갤럭시 GPU 대응)
+// 인식 오류가 반복되면 다른 방식으로 다시 만든다
 async function faceError(e) {
   console.warn('face detect error', e);
   if (++FACE.errs < 3 || FACE.busy) return;
   FACE.errs = 0;
-  if (FACE.delegate === 'CPU') { FACE.state = 'failed'; updateFaceState(); toast('얼굴 인식이 이 기기에서 동작하지 않아요', 4000); return; }
-  FACE.busy = true;
-  try {
-    try { FACE.lm.close(); } catch {}
-    FACE.lm = await FACE.make('CPU'); FACE.delegate = 'CPU'; FACE.mode = 'VIDEO';
-    toast('얼굴 인식을 호환 모드로 바꿨어요', 2500);
-  } catch { FACE.state = 'failed'; updateFaceState(); }
-  finally { FACE.busy = false; }
+  const other = FACE.delegate === 'GPU' ? 'CPU' : 'GPU';
+  if (FACE.tried.includes(other)) {
+    FACE.state = 'failed'; FACE.reason = '두 가지 인식 방식 모두 오류가 났어요: ' + ((e && e.message) || e);
+    updateFaceState(); toast('얼굴 인식이 이 기기에서 동작하지 않아요', 4000); return;
+  }
+  await switchDelegate(other, `인식 오류가 나서 ${modeName(other)}로 바꿨어요`);
 }
 
 /* ───── 상태 진단 (얼굴 탭 하단) ───── */
-const VERSION = 'v3';
+const VERSION = 'v4';
 let detCount = 0, detFps = 0;
 setInterval(() => {
   detFps = detCount * 2; detCount = 0;
-  const parts = [`버전 ${VERSION}`, `인식 ${FACE.state === 'ready' ? FACE.delegate : FACE.state}`];
+  const st = FACE.state === 'ready' ? modeName(FACE.delegate) : FACE.state === 'loading' ? '불러오는 중' : '실패';
+  const parts = [`버전 ${VERSION}`, `인식 ${st}`];
   if (S.source === 'camera') parts.push(`${detFps}회/초`);
   parts.push(S.eyes.length === 2 ? '얼굴 ✓' : '얼굴 ✗', `눈 ${Math.round(S.eye * 100)} · 갸름 ${Math.round(S.slim * 100)}`);
   $('diag').textContent = parts.join(' · ');
@@ -699,4 +741,4 @@ async function useStream(st) {
   camToken++; if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = st; S.eyes = []; S.feat = null; video.srcObject = st; await video.play(); FACE.frame = 0; setMode('camera');
 }
-window.__rea = { S, FACE, loadFile, useStream };
+window.__rea = { S, FACE, loadFile, useStream, switchDelegate };
